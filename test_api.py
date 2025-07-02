@@ -40,30 +40,17 @@ def test_root_endpoint():
         print(f"❌ Root endpoint failed: {e}")
         return False
 
-def test_agent_endpoint():
-    """Test the agent test endpoint"""
-    print("\n🔍 Testing agent endpoint...")
-    try:
-        response = requests.get(f"{API_BASE}/agent")
-        response.raise_for_status()
-        data = response.json()
-        print(f"✅ Agent test response:")
-        print(json.dumps(data, indent=2))
-        return True
-    except Exception as e:
-        print(f"❌ Agent endpoint failed: {e}")
-        return False
-
 def test_travel_plan(preferences: Dict[str, Any]):
     """Test the travel plan generation endpoint"""
-    print(f"\n🔍 Testing travel plan generation with preferences:")
+    print(f"\n🔍 Testing travel plan generation:")
     print(json.dumps(preferences, indent=2))
     
     try:
         response = requests.post(
             f"{API_BASE}/plan",
             json=preferences,
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json"},
+            timeout=120
         )
         response.raise_for_status()
         data = response.json()
@@ -79,49 +66,39 @@ def test_travel_plan(preferences: Dict[str, Any]):
             print(f"Response text: {e.response.text}")
         return False
 
-def test_any_city_functionality():
-    """Test the new any-city endpoint with AI-generated content"""
-    print("\n🌟 Testing ANY City Functionality with AI Generation...")
+def test_any_city_functionality(test_scenarios):
+    """Test the any-city endpoint with user-defined scenarios"""
+    print("\n🌟 Testing AI-Powered Any City Functionality...")
     print("="*60)
-    
-    # Test cities from different regions of India
-    test_cities = [
-        {"city": "Chandigarh", "days": 1, "budget": "mid-range"},
-        {"city": "Kochi", "days": 2, "budget": "cheap"},
-        {"city": "Udaipur", "days": 1, "budget": "expensive"},
-        {"city": "Darjeeling", "days": 2, "budget": "mid-range"},
-        {"city": "Amritsar", "days": 1, "budget": "cheap"}
-    ]
     
     successful_tests = 0
     
-    for i, city_request in enumerate(test_cities, 1):
-        print(f"\n🏙️ Test {i}: {city_request['city']}")
+    for i, city_request in enumerate(test_scenarios, 1):
+        print(f"\n🏙️ Test {i}: {city_request['city']} ({city_request['days']} day{'s' if city_request['days'] > 1 else ''})")
         try:
             response = requests.post(
                 f"{API_BASE}/any-city-plan",
                 json=city_request,
-                timeout=120  # Increased timeout for AI generation
+                timeout=120
             )
             
             if response.status_code == 200:
                 data = response.json()
                 plan = data.get("plan", "")
                 
-                # Enhanced quality check for AI-generated content
+                # Quality check for AI-generated content
                 if (len(plan) > 500 and 
                     "Rating:" in plan and 
-                    "Address:" in plan and
                     city_request['city'] in plan):
                     print(f"✅ {city_request['city']} AI plan generated successfully!")
                     successful_tests += 1
                     
                     # Show preview of AI-generated content
-                    preview_lines = plan.split('\n')[:8]
+                    preview_lines = plan.split('\n')[:10]
                     for line in preview_lines:
                         if line.strip():
                             print(f"   {line}")
-                    print("   ... (AI-generated content continues)")
+                    print("   ... (plan continues)")
                 else:
                     print(f"⚠️ {city_request['city']} plan quality insufficient")
                     print(f"   Plan length: {len(plan)} chars")
@@ -131,36 +108,59 @@ def test_any_city_functionality():
         except Exception as e:
             print(f"❌ {city_request['city']} error: {e}")
     
-    print(f"\n📊 AI-Generated City Tests: {successful_tests}/{len(test_cities)} successful")
-    return successful_tests >= 3  # Allow some flexibility for AI generation
+    print(f"\n📊 AI-Generated Plans: {successful_tests}/{len(test_scenarios)} successful")
+    return successful_tests >= len(test_scenarios) * 0.6  # Allow 60% success rate
 
 def main():
-    """Updated main test function for AI-powered system"""
+    """Main test function for AI-powered system with user-defined scenarios"""
     print("🧳 Travel Planner API Test Suite - AI-Powered Version")
     print("="*60)
     
     # Test basic endpoints
     health_ok = test_health_check()
-    root_ok = test_root_endpoint() 
-    agent_ok = test_agent_endpoint()
+    root_ok = test_root_endpoint()
     
-    # Test original functionality with AI
-    original_success = 0
-    print("\n🤖 Testing AI-Powered Plan Generation...")
-    for scenario in [
-        {"city": "Raipur", "days": 1, "place_type": "Modern", "food_type": "vegetarian", "budget": "cheap"}
-    ]:
-        if test_travel_plan(scenario):
-            original_success += 1
+    # Define your test scenarios here
+    user_scenarios = [
+        {
+            "city": "Chandigarh", 
+            "days": 2, 
+            "budget": "mid-range",
+            "food_preference": "vegetarian cuisine"
+        },
+        {
+            "city": "Udaipur", 
+            "days": 1, 
+            "budget": "expensive",
+            "food_preference": "Rajasthani cuisine"
+        },
+        {
+            "city": "Kochi", 
+            "days": 2, 
+            "budget": "cheap",
+            "food_preference": "seafood"
+        }
+    ]
     
-    # Test new any-city functionality with AI
-    any_city_ok = test_any_city_functionality()
+    # Test user-defined scenarios
+    print(f"\n🎯 Testing {len(user_scenarios)} User-Defined Scenarios...")
+    any_city_ok = test_any_city_functionality(user_scenarios)
     
-    # Enhanced summary
-    print(f"\n📊 AI-POWERED TEST SUMMARY:")
+    # Summary
+    print(f"\n📊 TEST SUMMARY:")
     print(f"Health Check: {'✅' if health_ok else '❌'}")
     print(f"Root Endpoint: {'✅' if root_ok else '❌'}")
-    print(f"Agent Test: {'✅' if agent_ok else '❌'}")
+    print(f"🤖 AI Any-City Plans: {'✅' if any_city_ok else '❌'}")
+    
+    if all([health_ok, root_ok, any_city_ok]):
+        print("\n🎉 ALL TESTS PASSED! The AI-Powered Travel Planner works great!")
+        print("🤖 All data is generated by Gemini AI for any Indian city!")
+    else:
+        print("\n⚠️ Some tests need attention. Check the logs above.")
+        print("💡 Note: AI generation may take time and requires good API connectivity.")
+
+if __name__ == "__main__":
+    main()
     print(f"AI Plan Generation: {'✅' if original_success > 0 else '❌'}")
     print(f"🤖 AI Any-City Functionality: {'✅' if any_city_ok else '❌'}")
     

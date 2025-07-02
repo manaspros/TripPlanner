@@ -53,8 +53,8 @@ async def root():
     return {
         "message": "Travel Planner API is running",
         "endpoints": {
-            "plan": "/plan - Generate travel plan",
-            "agent_test": "/api/agent - Test agent functionality" if ROUTES_AVAILABLE else "Not available",
+            "plan": "/api/plan - Generate travel plan",
+            "any_city_plan": "/api/any-city-plan - Generate plan for any Indian city",
             "docs": "/docs - API documentation"
         },
         "api_status": {
