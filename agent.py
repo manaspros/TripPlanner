@@ -1,53 +1,160 @@
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.agents import create_react_agent, AgentExecutor
-from langchain.prompts import PromptTemplate
-from tools import tools
-from config import config
 import os
+from config import config
 
-# Initialize the LLM
-llm = ChatGoogleGenerativeAI(
-    model="gemini-pro",
-    google_api_key=config.GOOGLE_API_KEY,
-    temperature=0.3,
-    max_tokens=1000  # Limit response length
-)
+# Handle imports with fallbacks
+try:
+    import google.generativeai as genai
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    GENAI_AVAILABLE = True
+except ImportError:
+    print("Warning: google.generativeai not available. Install with: pip install google-generativeai")
+    GENAI_AVAILABLE = False
 
-# Optimized prompt template for faster responses
-prompt_template = PromptTemplate(
-    input_variables=["input", "agent_scratchpad", "tools", "tool_names"],
-    template="""You are a travel planning assistant. Generate a concise plan quickly.
+try:
+    from langchain.agents import create_openai_tools_agent, AgentExecutor
+    from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    print("Warning: LangChain agents not available")
+    LANGCHAIN_AVAILABLE = False
 
-Available tools: {tool_names}
-{tools}
+from tools import tools
 
-User request: {input}
+# Configure Gemini
+GOOGLE_API_KEY = config.GOOGLE_API_KEY or os.getenv("GOOGLE_API_KEY")
 
-Instructions:
-1. Use 1-2 tools maximum to get place and restaurant data
-2. Recommend exactly 1 place to visit and 1 place to eat
-3. Keep responses short and focused
-4. Format as: VISIT: [place] | EAT: [restaurant] | WHY: [brief reason]
+if GENAI_AVAILABLE and GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
+    
+    # Initialize Gemini 1.5 Flash model (newer and more stable)
+    try:
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-1.5-flash",  # Updated to 1.5 Flash
+            google_api_key=GOOGLE_API_KEY,
+            temperature=0.3,
+            convert_system_message_to_human=True,
+            max_retries=3,
+            request_timeout=30
+        )
+        print("✅ Using Gemini 1.5 Flash model")
+    except Exception as e:
+        print(f"⚠️ Gemini 1.5 Flash failed, trying Gemini 1.5 Pro: {e}")
+        try:
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-1.5-pro",  # Fallback to 1.5 Pro
+                google_api_key=GOOGLE_API_KEY,
+                temperature=0.3,
+                convert_system_message_to_human=True,
+                max_retries=3,
+                request_timeout=30
+            )
+            print("✅ Using Gemini 1.5 Pro model")
+        except Exception as e2:
+            print(f"❌ Both Gemini 1.5 models failed: {e2}")
+            # Final fallback to basic model
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-pro",
+                google_api_key=GOOGLE_API_KEY,
+                temperature=0.3,
+                convert_system_message_to_human=True
+            )
+            print("⚠️ Using legacy Gemini Pro model")
+else:
+    print("Warning: Using fallback LLM - Gemini not configured")
+    # Fallback LLM class
+    class FallbackLLM:
+        def invoke(self, messages):
+            return {"content": "Fallback response - please configure Google API key"}
+    
+    llm = FallbackLLM()
 
-{agent_scratchpad}
+# Create enhanced prompt for travel planning
+if LANGCHAIN_AVAILABLE:
+    travel_prompt = ChatPromptTemplate.from_messages([
+        ("system", """You are an expert AI travel planner for India. Your goal is to create detailed, comprehensive itineraries using ONLY AI-generated real data from tools.
 
-Response:"""
-)
+CRITICAL REQUIREMENTS:
+1. You MUST call tools to get AI-generated realistic data - NEVER use placeholder text
+2. ALWAYS call restaurant_search tool to get specific restaurant names with complete details
+3. ALWAYS call google_places_search tool to get specific place names with full information  
+4. Call get_reviews tool for additional travel insights and tips
+5. If a tool returns insufficient results, try different search terms and call tools again
+6. Only recommend places with 4.0+ ratings from tool results
+7. Include ALL details from tool responses (ratings, prices, addresses, timings, why famous)
 
-# Create agent with timeout settings
-agent = create_react_agent(
-    llm=llm,
-    tools=tools,
-    prompt=prompt_template
-)
+ENHANCED TOOL USAGE STRATEGY:
+- For EACH attraction: Call google_places_search with specific queries (e.g., "historical monuments", "temples", "parks")
+- For EACH meal: Call restaurant_search with cuisine type and meal timing (e.g., "vegetarian lunch", "street food")
+- For comprehensive planning: Call get_reviews for additional insights about the destination
+- Use exact names, ratings, and details returned by tools
+- Make multiple tool calls to gather comprehensive information
 
-# Configure agent executor with strict limits
-agent_executor = AgentExecutor(
-    agent=agent,
-    tools=tools,
-    verbose=True,
-    max_iterations=3,  # Reduced from default
-    max_execution_time=30,  # 30 second timeout
-    early_stopping_method="generate",
-    handle_parsing_errors=True
-)
+RESPONSE FORMAT REQUIREMENTS:
+- Every place/restaurant name must be specific and real (from AI-generated tool results)
+- Include complete address from tools
+- Show exact ratings (e.g., "Rating: 4.5") from tools  
+- Include opening hours, entry fees, duration from tools
+- Add "Why Famous" information from tools
+- Include specific restaurant details: cuisine, famous dishes, price ranges
+- Format with proper headers, bullet points, and clear sections
+
+ENHANCED OUTPUT FORMAT:
+🏛️ DAY X: [City] Exploration - [Theme]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⏰ [Time] - VISIT: [Exact Place Name from AI tool] (⭐ Rating: X.X)
+📍 Address: [Complete address from tool]
+🕒 Hours: [Opening hours from tool]  
+💰 Entry: [Entry fee from tool]
+⏱️ Duration: [Recommended duration from tool]
+✨ Why Visit: [Why famous description from tool]
+
+🍽️ [MEAL TIME]: [Exact Restaurant Name from AI tool] (⭐ Rating: X.X)
+📍 Address: [Complete address from tool]
+💰 Price: [Price range from tool]
+🍛 Cuisine: [Cuisine type from tool]
+⭐ Famous For: [Famous dishes from tool]
+🍴 Specialties: [Specific dishes from tool]
+
+📝 TRAVEL INSIGHTS: [Insights from get_reviews tool]
+
+VALIDATION CHECKLIST:
+✅ Every place/restaurant name is specific and from AI tools
+✅ All ratings are from actual tool responses
+✅ All addresses are complete from tools
+✅ All prices/fees are from tool data
+✅ No generic or placeholder text used
+✅ Multiple tool calls made for comprehensive information
+✅ Travel insights included from reviews tool
+
+Remember: Call tools extensively and use their AI-generated realistic data. Never assume or use generic information."""),
+        
+        ("human", "{input}"),
+        MessagesPlaceholder(variable_name="agent_scratchpad"),
+    ])
+
+    # Create agent with tools
+    if GENAI_AVAILABLE and GOOGLE_API_KEY:
+        agent = create_openai_tools_agent(llm, tools, travel_prompt)
+        
+        # Create agent executor with enhanced configuration for AI-generated content
+        agent_executor = AgentExecutor(
+            agent=agent,
+            tools=tools,
+            verbose=True,
+            max_iterations=20,  # Increased for more comprehensive AI generation
+            return_intermediate_steps=True,
+            handle_parsing_errors=True,
+            max_execution_time=180  # 3 minute timeout for AI generation
+        )
+    else:
+        # Fallback agent executor
+        class FallbackAgentExecutor:
+            def invoke(self, input_dict):
+                query = input_dict.get("input", "")
+                return {
+                    "output": f"Fallback response for: {query}. Please configure API keys.",
+                    "intermediate_steps": []
+                }
+        
+        agent_executor = FallbackAgentExecutor()

@@ -1,10 +1,28 @@
 # filepath: d:\Code\Majorproject\main.py
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from agent import agent_executor
 from config import config
-from routes import router as api_router
 import uvicorn
+
+# Handle imports with error handling
+try:
+    from agent import agent_executor
+    AGENT_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Agent import failed: {e}")
+    AGENT_AVAILABLE = False
+    # Create fallback
+    class FallbackAgent:
+        def invoke(self, input_dict):
+            return {"output": "Agent not available - check dependencies"}
+    agent_executor = FallbackAgent()
+
+try:
+    from routes import router as api_router
+    ROUTES_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Routes import failed: {e}")
+    ROUTES_AVAILABLE = False
 
 app = FastAPI(
     title=config.APP_NAME,
@@ -14,7 +32,7 @@ app = FastAPI(
 
 class TravelRequest(BaseModel):
     city: str
-    time_of_day: str
+    days: int
     place_type: str
     food_type: str
     budget: str
@@ -23,8 +41,9 @@ class TravelResponse(BaseModel):
     plan: str
     sources_used: list
 
-# Include the router in the main application
-app.include_router(api_router, prefix="/api")
+# Include the router in the main application if available
+if ROUTES_AVAILABLE:
+    app.include_router(api_router, prefix="/api")
 
 @app.get("/")
 async def root():
@@ -34,13 +53,15 @@ async def root():
     return {
         "message": "Travel Planner API is running",
         "endpoints": {
-            "plan": "/api/plan - Generate travel plan",
-            "agent_test": "/api/agent - Test agent functionality",
+            "plan": "/plan - Generate travel plan",
+            "agent_test": "/api/agent - Test agent functionality" if ROUTES_AVAILABLE else "Not available",
             "docs": "/docs - API documentation"
         },
         "api_status": {
             "configured": validation["has_required_keys"],
-            "warnings": validation["warnings"]
+            "warnings": validation["warnings"],
+            "agent_available": AGENT_AVAILABLE,
+            "routes_available": ROUTES_AVAILABLE
         }
     }
 
@@ -48,12 +69,14 @@ async def root():
 async def create_travel_plan(request: TravelRequest):
     try:
         # Format the query for the agent
+        days_text = f"{request.days} day{'s' if request.days > 1 else ''}"
         query = f"""
-        Plan for {request.time_of_day} in {request.city}:
+        Plan {days_text} itinerary for {request.city}:
         - Looking for {request.place_type} to visit
         - Want {request.food_type} food within {request.budget} budget
         - Need places with 4.0+ rating
         - Include opening hours and why places are recommended
+        - Create day-wise schedule with morning, lunch, and afternoon activities
         """
         
         # Execute the agent
@@ -70,7 +93,14 @@ async def create_travel_plan(request: TravelRequest):
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy", "version": config.APP_VERSION}
+    return {
+        "status": "healthy", 
+        "version": config.APP_VERSION,
+        "dependencies": {
+            "agent": AGENT_AVAILABLE,
+            "routes": ROUTES_AVAILABLE
+        }
+    }
 
 # To run this file: uvicorn main:app --reload
 if __name__ == "__main__":
