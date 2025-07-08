@@ -69,10 +69,11 @@ CRITICAL INSTRUCTIONS:
 8. For each place, include WHY it's worth visiting and duration needed
 
 REQUIRED ACTIONS PER DAY:
-- Call google_places_search at least 3 times for different attractions/activities
-- Call restaurant_search at least 3 times for breakfast, lunch, dinner options
-- Each recommendation must include specific names, ratings, and details
-- Include timing optimization to avoid crowds and heat
+- For EACH of the {prefs.days} days, you MUST generate a separate section.
+- Call google_places_search at least 3 times for different attractions/activities per day.
+- Call restaurant_search at least 3 times for breakfast, lunch, dinner options per day.
+- Each recommendation must include specific names, ratings, and details.
+- Include timing optimization to avoid crowds and heat.
 
 FORMAT REQUIREMENTS:
 **DAY X: [Theme] Exploration**
@@ -191,32 +192,42 @@ async def get_travel_plan(prefs: UserPreferences):
         detailed_prompt = create_detailed_prompt(prefs)
         print(f"Generated prompt for {prefs.days} days in {prefs.city}")
 
-        max_retries = 3
-        plan_output = None
+        # max_retries = 3
+        # plan_output = None
         
-        for attempt in range(max_retries):
-            print(f"Attempt {attempt + 1} to generate plan...")
-            
-            # Run agent with extended timeout for API calls
-            with ThreadPoolExecutor() as executor:
-                future = executor.submit(run_agent_with_timeout, detailed_prompt, 75)
-                try:
-                    plan_output = future.result(timeout=80)
-                    
-                    # Check if output contains fallback terms
-                    if plan_output and not contains_fallback_terms(plan_output):
-                        print("✅ Generated plan with real data")
-                        break
-                    else:
-                        print(f"⚠️ Attempt {attempt + 1} contained fallback data, retrying...")
-                        if attempt < max_retries - 1:
-                            # Try with more specific prompt
-                            detailed_prompt += f"\n\nATTEMPT {attempt + 2}: Previous attempt used generic terms. You MUST use tool results for ALL details including hours, fees, and descriptions."
-                        
-                except Exception as timeout_error:
-                    print(f"Timeout error on attempt {attempt + 1}: {timeout_error}")
-                    if attempt == max_retries - 1:
-                        plan_output = "Unable to generate detailed plan due to timeout. Please try again."
+        # for attempt in range(max_retries):
+        #     print(f"Attempt {attempt + 1} to generate plan...")
+        #     
+        #     # Run agent with extended timeout for API calls
+        #     with ThreadPoolExecutor() as executor:
+        #         future = executor.submit(run_agent_with_timeout, detailed_prompt, 75)
+        #         try:
+        #             plan_output = future.result(timeout=80)
+        #             
+        #             # Check if output contains fallback terms
+        #             if plan_output and not contains_fallback_terms(plan_output):
+        #                 print("✅ Generated plan with real data")
+        #                 break
+        #             else:
+        #                 print(f"⚠️ Attempt {attempt + 1} contained fallback data, retrying...")
+        #                 if attempt < max_retries - 1:
+        #                     # Try with more specific prompt
+        #                     detailed_prompt += f"\n\nATTEMPT {attempt + 2}: Previous attempt used generic terms. You MUST use tool results for ALL details including hours, fees, and descriptions."
+        #                 
+        #         except Exception as timeout_error:
+        #             print(f"Timeout error on attempt {attempt + 1}: {timeout_error}")
+        #             if attempt == max_retries - 1:
+        #                 plan_output = "Unable to generate detailed plan due to timeout. Please try again."
+
+        # --- Show result directly from first attempt ---
+        plan_output = None
+        with ThreadPoolExecutor() as executor:
+            future = executor.submit(run_agent_with_timeout, detailed_prompt, 75)
+            try:
+                plan_output = future.result(timeout=80)
+            except Exception as timeout_error:
+                print(f"Timeout error: {timeout_error}")
+                plan_output = "Unable to generate detailed plan due to timeout. Please try again."
 
         # Final validation
         if not plan_output:
