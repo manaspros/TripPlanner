@@ -89,6 +89,13 @@ ENHANCED TOOL USAGE STRATEGY:
 - Use exact names, ratings, and details returned by tools
 - Make multiple tool calls to gather comprehensive information
 
+🕒 TIME-OF-DAY REQUIREMENT:
+- For each day, you MUST recommend places for different times of day:
+  • Morning (e.g., 8:00 AM - 12:00 PM): Outdoor or cool-weather attractions
+  • Afternoon (e.g., 12:00 PM - 5:00 PM): Indoor, shaded, or museum-type attractions
+  • Evening (e.g., 5:00 PM onwards): Popular evening spots, markets, or scenic locations
+- For each time slot, call google_places_search with an appropriate time_of_day parameter and explain why the place fits that slot.
+
 RESPONSE FORMAT REQUIREMENTS:
 - Every place/restaurant name must be specific and real (from AI-generated tool results)
 - Include complete address from tools
@@ -127,7 +134,9 @@ VALIDATION CHECKLIST:
 ✅ Multiple tool calls made for comprehensive information
 ✅ Travel insights included from reviews tool
 
-Remember: Call tools extensively and use their AI-generated realistic data. Never assume or use generic information."""),
+Remember: Call tools extensively and use their AI-generated realistic data. Never assume or use generic information.
+You MUST provide recommendations for morning, afternoon, and evening time slots each day, using the time_of_day parameter in your tool calls.
+"""),
         
         ("human", "{input}"),
         MessagesPlaceholder(variable_name="agent_scratchpad"),

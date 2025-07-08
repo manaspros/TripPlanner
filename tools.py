@@ -58,7 +58,8 @@ class AIGooglePlacesTool(BaseTool):
     def _generate_places_with_ai(self, query: str, location: str, place_type: str = None, time_of_day: str = "morning"):
         """Use Gemini AI to generate realistic place recommendations"""
         if not tool_model:
-            return self._generate_fallback_places(query, location)
+            # No fallback: return error message
+            return None
         
         try:
             prompt = f"""
@@ -130,40 +131,15 @@ class AIGooglePlacesTool(BaseTool):
                             'why_famous': place.get('why_famous', 'Popular local attraction')
                         })
                 
-                return validated_places if validated_places else self._generate_fallback_places(query, location)
+                return validated_places if validated_places else None
                 
             except json.JSONDecodeError:
                 print("⚠️ Failed to parse AI response as JSON, using fallback")
-                return self._generate_fallback_places(query, location)
+                return None
                 
         except Exception as e:
             print(f"⚠️ AI place generation failed: {e}")
-            return self._generate_fallback_places(query, location)
-    
-    def _generate_fallback_places(self, query: str, location: str):
-        """Generate basic fallback places when AI fails"""
-        return [
-            {
-                'name': f'Popular {query.title()} Attraction in {location}',
-                'rating': 4.2,
-                'address': f'{location}, India',
-                'place_id': 'fallback_place_1',
-                'hours': '9:00 AM - 6:00 PM',
-                'entry_fee': 'Entry fee varies',
-                'duration': '2-3 hours',
-                'why_famous': f'Well-known {query} destination in {location}'
-            },
-            {
-                'name': f'{location} Heritage Site',
-                'rating': 4.3,
-                'address': f'{location}, India',
-                'place_id': 'fallback_place_2',
-                'hours': '9:00 AM - 5:00 PM',
-                'entry_fee': 'Varies by location',
-                'duration': '2-4 hours',
-                'why_famous': f'Important cultural heritage site in {location}'
-            }
-        ]
+            return None
 
     def _run(self, query: str, location: Optional[str] = None, type: Optional[str] = None, time_of_day: Optional[str] = None) -> str:
         location = location or "Delhi"
@@ -172,7 +148,7 @@ class AIGooglePlacesTool(BaseTool):
         places = self._generate_places_with_ai(query, location, type, time_of_day)
         
         if not places:
-            return f"Unable to generate place recommendations for {query} in {location}. Please try a different search."
+            return f"Unable to generate place recommendations for {query} in {location}. Please try again later."
         
         result = f"🏛️ PLACES FOR {time_of_day.upper()} VISIT in {location}:\n\n"
         for i, place in enumerate(places[:3]):
@@ -194,142 +170,73 @@ class AIGooglePlacesTool(BaseTool):
 # --- AI-Powered Restaurant Search Tool ---
 class AIRestaurantSearchTool(BaseTool):
     name: str = "restaurant_search"
-    description: str = "AI-powered restaurant search that generates comprehensive food recommendations"
+    description: str = "Searches for real restaurants using Google Places API only. Does NOT generate restaurants."
     args_schema: Type[BaseModel] = FoodSearchInput
 
-    def _generate_restaurants_with_ai(self, query: str, location: str, meal_type: str = "lunch", near_place: str = None):
-        """Use Gemini AI to generate realistic restaurant recommendations"""
-        if not tool_model:
-            return self._generate_fallback_restaurants(query, location)
-        
+    def _search_restaurants_google_places(self, query: str, location: str, meal_type: str = "lunch", near_place: str = None):
+        """Search for real restaurants using Google Places API only"""
+        GOOGLE_PLACES_API_KEY = config.GOOGLE_PLACES_API_KEY or os.getenv("GOOGLE_PLACES_API_KEY")
+        if not GOOGLE_PLACES_API_KEY:
+            return None
+
+        # Build the search URL
+        base_url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+        search_query = f"{query} restaurants in {location}"
+        params = {
+            "query": search_query,
+            "type": "restaurant",
+            "key": GOOGLE_PLACES_API_KEY,
+        }
         try:
-            near_text = f" near {near_place}" if near_place else ""
-            prompt = f"""
-            Generate 3-5 realistic and popular restaurants for "{query}" food in {location}, India{near_text}.
-            
-            Requirements:
-            - Only suggest restaurants that could realistically exist in {location}
-            - Focus on {meal_type} options
-            - Include variety: local favorites, established chains, street food places
-            - Provide accurate, realistic information for Indian restaurants
-            
-            For each restaurant, provide:
-            1. Name (realistic restaurant name)
-            2. Rating (4.0-4.7 range)
-            3. Complete address
-            4. Price range in Indian rupees per person
-            5. Cuisine type
-            6. Famous dishes (specific to cuisine)
-            7. What makes it special
-            8. Suitable meal types
-            
-            Format as JSON array:
-            [
-              {{
-                "name": "Restaurant Name",
-                "rating": 4.4,
-                "address": "Complete address in {location}",
-                "price_range": "₹200-400 per person",
-                "cuisine": "Cuisine Type",
-                "famous_for": "Famous dishes and specialties",
-                "specialties": "Specific dishes",
-                "meal_type": ["lunch", "dinner"]
-              }}
-            ]
-            
-            Make it realistic for {location}, India.
-            """
-            
-            response = tool_model.generate_content(prompt)
-            
-            # Parse JSON response
-            try:
-                response_text = response.text
-                if '```json' in response_text:
-                    json_start = response_text.find('```json') + 7
-                    json_end = response_text.find('```', json_start)
-                    json_text = response_text[json_start:json_end].strip()
-                elif '[' in response_text and ']' in response_text:
-                    json_start = response_text.find('[')
-                    json_end = response_text.rfind(']') + 1
-                    json_text = response_text[json_start:json_end]
-                else:
-                    json_text = response_text
-                
-                restaurants = json.loads(json_text)
-                
-                # Validate and ensure proper data
-                validated_restaurants = []
-                for restaurant in restaurants[:5]:
-                    if isinstance(restaurant, dict) and restaurant.get('name'):
-                        validated_restaurants.append({
-                            'name': restaurant.get('name', 'Local Restaurant'),
-                            'rating': float(restaurant.get('rating', 4.2)),
-                            'address': restaurant.get('address', f'{location}, India'),
-                            'price_range': restaurant.get('price_range', '₹200-400 per person'),
-                            'cuisine': restaurant.get('cuisine', 'Multi-cuisine'),
-                            'famous_for': restaurant.get('famous_for', 'Quality food and service'),
-                            'specialties': restaurant.get('specialties', 'Local favorites'),
-                            'meal_type': restaurant.get('meal_type', [meal_type])
-                        })
-                
-                return validated_restaurants if validated_restaurants else self._generate_fallback_restaurants(query, location)
-                
-            except json.JSONDecodeError:
-                print("⚠️ Failed to parse restaurant AI response, using fallback")
-                return self._generate_fallback_restaurants(query, location)
-                
+            response = requests.get(base_url, params=params, timeout=10)
+            data = response.json()
+            if data.get("status") != "OK" or not data.get("results"):
+                return None
+
+            # Filter and format results
+            restaurants = []
+            for r in data["results"]:
+                rating = r.get("rating", 0)
+                if rating and float(rating) >= 4.0:
+                    restaurants.append({
+                        "name": r.get("name", ""),
+                        "rating": float(rating),
+                        "address": r.get("formatted_address", ""),
+                        "price_level": r.get("price_level", None),
+                        "cuisine": query.title(),
+                        "famous_for": "",
+                        "specialties": "",
+                        "meal_type": [meal_type],
+                        "place_id": r.get("place_id", ""),
+                    })
+                if len(restaurants) >= 5:
+                    break
+            return restaurants if restaurants else None
         except Exception as e:
-            print(f"⚠️ AI restaurant generation failed: {e}")
-            return self._generate_fallback_restaurants(query, location)
-    
-    def _generate_fallback_restaurants(self, query: str, location: str):
-        """Generate basic fallback restaurants when AI fails"""
-        return [
-            {
-                'name': f'{location} {query.title()} Restaurant',
-                'rating': 4.2,
-                'address': f'{location}, India',
-                'price_range': '₹200-400 per person',
-                'cuisine': f'{query.title()} Cuisine',
-                'famous_for': f'Authentic {query} dishes',
-                'specialties': f'Traditional {query} preparations',
-                'meal_type': ['lunch', 'dinner']
-            },
-            {
-                'name': f'Popular {query.title()} Dhaba {location}',
-                'rating': 4.3,
-                'address': f'{location}, India',
-                'price_range': '₹150-300 per person',
-                'cuisine': f'Traditional {query.title()}',
-                'famous_for': f'Home-style {query} cooking',
-                'specialties': f'Fresh {query} meals',
-                'meal_type': ['lunch', 'dinner']
-            }
-        ]
+            print(f"⚠️ Google Places restaurant search failed: {e}")
+            return None
 
     def _run(self, query: str, location: Optional[str] = None, near_place: Optional[str] = None, meal_type: Optional[str] = None) -> str:
         location = location or "Delhi"
         meal_type = meal_type or "lunch"
-        
-        restaurants = self._generate_restaurants_with_ai(query, location, meal_type, near_place)
-        
+
+        # Only use Google Places API for restaurant search
+        restaurants = self._search_restaurants_google_places(query, location, meal_type, near_place)
+
         if not restaurants:
-            return f"Unable to generate restaurant recommendations for {query} in {location}. Please try a different cuisine."
-        
-        result = f"🍽️ RESTAURANTS FOR {meal_type.upper()} in {location}:\n\n"
+            return f"Unable to find real restaurants for {query} in {location} using Google Places. Please try a different search or check your API key."
+
+        result = f"🍽️ RESTAURANTS FOR {meal_type.upper()} in {location} (from Google Places):\n\n"
         for i, restaurant in enumerate(restaurants[:3]):
             result += f"🏪 {restaurant['name']} (⭐ Rating: {restaurant['rating']})\n"
             result += f"   📍 Address: {restaurant['address']}\n"
-            result += f"   💰 Price Range: {restaurant['price_range']}\n"
+            if restaurant.get("price_level") is not None:
+                result += f"   💰 Price Level: {restaurant['price_level']}\n"
             result += f"   🍛 Cuisine: {restaurant['cuisine']}\n"
-            result += f"   ⭐ Famous For: {restaurant['famous_for']}\n"
-            result += f"   🍴 Specialties: {restaurant['specialties']}\n"
+            # No AI-generated famous_for or specialties
             result += f"   🕒 Perfect for: {', '.join(restaurant['meal_type'])}\n"
-            
             if i < len(restaurants) - 1:
                 result += "\n"
-        
         return result
 
     async def _arun(self, query: str, location: Optional[str] = None, near_place: Optional[str] = None, meal_type: Optional[str] = None) -> str:
