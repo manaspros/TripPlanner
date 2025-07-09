@@ -28,7 +28,7 @@ if GENAI_AVAILABLE and GOOGLE_API_KEY:
     
     # Initialize Gemini model for tools
     try:
-        tool_model = genai.GenerativeModel('gemini-1.5-flash')
+        tool_model = genai.GenerativeModel('gemini-2.0-flash')
         print("✅ Gemini model configured for tools")
     except Exception as e:
         print(f"⚠️ Gemini model configuration failed: {e}")
@@ -48,6 +48,10 @@ class FoodSearchInput(BaseModel):
     location: Optional[str] = Field(None, description="Location for search")
     near_place: Optional[str] = Field(None, description="Find food near this place")
     meal_type: Optional[str] = Field(None, description="breakfast/lunch/dinner/snacks")
+
+class RedditSearchInput(BaseModel):
+    city: str = Field(description="City to search for")
+    topic: str = Field(description="Topic or keyword to search for (e.g., food, sightseeing, travel tips)")
 
 # --- AI-Powered Google Places Tool ---
 class AIGooglePlacesTool(BaseTool):
@@ -276,18 +280,6 @@ class AIReviewsTool(BaseTool):
         except Exception as e:
             print(f"⚠️ AI insights generation failed: {e}")
             return self._generate_fallback_insights(query, location)
-    
-    def _generate_fallback_insights(self, query: str, location: str):
-        """Generate basic fallback insights when AI fails"""
-        return f"""
-        📝 TRAVEL TIPS for {query} in {location}:
-        
-        🕒 Best Time: Early morning or late afternoon for comfortable weather
-        💡 Tip: Carry water and wear comfortable walking shoes
-        💰 Budget: Keep cash handy as many places prefer cash payments
-        📱 Preparation: Check opening hours before visiting
-        🎒 Essentials: Carry ID proof for heritage sites and attractions
-        """
 
     def _run(self, query: str, location: Optional[str] = None, near_place: Optional[str] = None, meal_type: Optional[str] = None) -> str:
         location = location or "Delhi"
@@ -299,9 +291,62 @@ class AIReviewsTool(BaseTool):
     async def _arun(self, query: str, location: Optional[str] = None, near_place: Optional[str] = None, meal_type: Optional[str] = None) -> str:
         return self._run(query, location, near_place, meal_type)
 
+# --- Reddit Search Tool ---
+class RedditSearchTool(BaseTool):
+    name: str = "reddit_search"
+    description: str = "Fetches and summarizes top Reddit posts for a given city and topic"
+    args_schema: Type[BaseModel] = RedditSearchInput
+
+    def _run(self, city: str, topic: str) -> str:
+        import requests
+
+        headers = {
+            "User-Agent": "TravelPlannerBot/1.0"
+        }
+        query = f"{city} {topic}"
+        url = f"https://www.reddit.com/search.json?q={quote_plus(query)}&sort=top&t=year&limit=5"
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            data = resp.json()
+            posts = data.get("data", {}).get("children", [])
+            if not posts:
+                return f"No relevant Reddit posts found for {city} on {topic}."
+
+            summaries = []
+            for post in posts:
+                post_data = post.get("data", {})
+                title = post_data.get("title", "")
+                subreddit = post_data.get("subreddit", "")
+                score = post_data.get("score", 0)
+                url = f"https://reddit.com{post_data.get('permalink', '')}"
+                summary = f"• [{title}]({url}) (r/{subreddit}, 👍 {score})"
+                summaries.append(summary)
+
+            summary_text = "\n".join(summaries)
+            if tool_model:
+                prompt = (
+                    f"Summarize the following Reddit posts for a traveler interested in {topic} in {city}:\n\n"
+                    f"{summary_text}\n\n"
+                    "Give a concise summary of the main tips or insights."
+                )
+                try:
+                    ai_summary = tool_model.generate_content(prompt)
+                    summary_result = ai_summary.text.strip()
+                    return f"🔎 **Reddit Insights for {city} - {topic}**\n\n{summary_result}\n\nTop posts:\n{summary_text}"
+                except Exception as e:
+                    print(f"Reddit AI summary failed: {e}")
+            return f"🔎 **Reddit Top Posts for {city} - {topic}**\n\n{summary_text}"
+        except Exception as e:
+            print(f"Reddit search failed: {e}")
+            return f"Could not fetch Reddit posts for {city} on {topic}."
+
+    async def _arun(self, city: str, topic: str) -> str:
+        return self._run(city, topic)
+
 # --- Tools List ---
 tools = [
     AIGooglePlacesTool(),
     AIRestaurantSearchTool(),
-    AIReviewsTool()
+    AIReviewsTool(),
+    RedditSearchTool(),
 ]
