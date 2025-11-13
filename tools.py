@@ -12,6 +12,14 @@ from urllib.parse import quote_plus
 import random
 from config import config
 
+# Import cache manager for API call optimization
+try:
+    from cache_manager import cache_manager
+    CACHE_AVAILABLE = True
+except ImportError:
+    print("Warning: cache_manager not available, caching disabled")
+    CACHE_AVAILABLE = False
+
 # Handle imports with fallbacks
 try:
     import google.generativeai as genai
@@ -174,10 +182,29 @@ class AIRestaurantSearchTool(BaseTool):
     args_schema: Type[BaseModel] = FoodSearchInput
 
     def _search_restaurants_google_places(self, query: str, location: str, meal_type: str = "lunch", near_place: str = None):
-        """Search for real restaurants using Google Places API only"""
+        """Search for real restaurants using Google Places API only (with caching)"""
         GOOGLE_PLACES_API_KEY = config.GOOGLE_PLACES_API_KEY or os.getenv("GOOGLE_PLACES_API_KEY")
         if not GOOGLE_PLACES_API_KEY:
             return None
+
+        # Try cache first (if available)
+        if CACHE_AVAILABLE:
+            cached_result = cache_manager.get(
+                "restaurants",
+                query=query,
+                location=location,
+                meal_type=meal_type,
+                near_place=near_place
+            )
+            if cached_result is not None:
+                print(f"✅ Using cached restaurant data for {query} in {location}")
+                return cached_result
+
+            # Check rate limit
+            if not cache_manager.check_rate_limit("google_places"):
+                print(f"⚠️ Google Places rate limit reached, using any available cache")
+                # Try to return even expired cache
+                return None
 
         # Build the search URL
         base_url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
@@ -188,6 +215,10 @@ class AIRestaurantSearchTool(BaseTool):
             "key": GOOGLE_PLACES_API_KEY,
         }
         try:
+            # Record API call for rate limiting
+            if CACHE_AVAILABLE:
+                cache_manager.record_api_call("google_places")
+
             response = requests.get(base_url, params=params, timeout=10)
             data = response.json()
             if data.get("status") != "OK" or not data.get("results"):
@@ -211,6 +242,19 @@ class AIRestaurantSearchTool(BaseTool):
                     })
                 if len(restaurants) >= 5:
                     break
+
+            # Cache the results (if available)
+            if CACHE_AVAILABLE and restaurants:
+                cache_manager.set(
+                    "restaurants",
+                    restaurants,
+                    query=query,
+                    location=location,
+                    meal_type=meal_type,
+                    near_place=near_place
+                )
+                print(f"✅ Cached restaurant data for {query} in {location}")
+
             return restaurants if restaurants else None
         except Exception as e:
             print(f"⚠️ Google Places restaurant search failed: {e}")

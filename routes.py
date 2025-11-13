@@ -445,3 +445,258 @@ The system is designed to work with any Indian city - please try again in a mome
 async def health_check():
     """Health check for routes"""
     return {"status": "routes_healthy"}
+
+
+# ============================================================================
+# MCP-POWERED ENDPOINTS
+# ============================================================================
+
+# Import MCP manager (optional)
+try:
+    from mcp_integration import mcp_manager, get_mcp_status
+    from cache_manager import cache_manager
+    MCP_ENDPOINTS_AVAILABLE = True
+except ImportError:
+    MCP_ENDPOINTS_AVAILABLE = False
+
+
+@router.get("/weather/{city}")
+async def get_weather_forecast(city: str, days: int = 5):
+    """
+    Get weather forecast for a city (MCP Weather Server)
+    Cached for 3 hours to minimize API calls
+    """
+    if not MCP_ENDPOINTS_AVAILABLE:
+        return {
+            "error": "MCP not available",
+            "message": "Install MCP and weather server to use this feature"
+        }
+
+    try:
+        # Try cache first
+        cached_weather = cache_manager.get("weather", city=city, days=days)
+        if cached_weather:
+            return {
+                "city": city,
+                "days": days,
+                "forecast": cached_weather,
+                "source": "cache",
+                "message": "Weather data from cache (3hr TTL)"
+            }
+
+        # Check rate limit
+        rate_status = cache_manager.get_rate_limit_status("weather")
+        if rate_status["status"] == "limit_exceeded":
+            return {
+                "error": "Rate limit exceeded",
+                "message": f"Weather API rate limit reached. Resets in {rate_status['reset_in']} seconds.",
+                "rate_limit": rate_status
+            }
+
+        # Call MCP weather server
+        result = await mcp_manager.call_tool_with_cache(
+            "weather",
+            "get_forecast",
+            {"city": city, "days": min(days, 7)},
+            cache_category="weather"
+        )
+
+        # Format response
+        weather_text = ""
+        if hasattr(result, 'content'):
+            for item in result.content:
+                if hasattr(item, 'text'):
+                    weather_text = item.text
+
+        return {
+            "city": city,
+            "days": days,
+            "forecast": weather_text,
+            "source": "mcp_weather",
+            "rate_limit": cache_manager.get_rate_limit_status("weather")
+        }
+
+    except Exception as e:
+        return {
+            "error": str(e),
+            "city": city,
+            "message": "Failed to fetch weather. Check OPENWEATHER_API_KEY in .env"
+        }
+
+
+class SavePlanRequest(BaseModel):
+    plan_data: dict
+    plan_name: Optional[str] = None
+
+
+@router.post("/save-plan")
+async def save_travel_plan(request: SavePlanRequest):
+    """
+    Save a travel plan for later retrieval (MCP File System)
+    """
+    if not MCP_ENDPOINTS_AVAILABLE:
+        return {
+            "error": "MCP not available",
+            "message": "Install MCP and filesystem server to use this feature"
+        }
+
+    try:
+        from datetime import datetime
+        import json
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        city = request.plan_data.get("city", "unknown")
+        plan_id = f"{city}_{timestamp}"
+
+        full_plan = {
+            "plan_id": plan_id,
+            "plan_name": request.plan_name or f"{city} Trip",
+            "created_at": datetime.now().isoformat(),
+            "data": request.plan_data
+        }
+
+        # Save via MCP filesystem
+        await mcp_manager.call_tool_with_cache(
+            "filesystem",
+            "write_file",
+            {
+                "path": f"{plan_id}.json",
+                "content": json.dumps(full_plan, indent=2)
+            },
+            bypass_cache=True
+        )
+
+        return {
+            "status": "success",
+            "plan_id": plan_id,
+            "plan_name": full_plan["plan_name"],
+            "created_at": full_plan["created_at"],
+            "message": "Plan saved successfully"
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to save plan"
+        }
+
+
+@router.get("/plans/{plan_id}")
+async def load_travel_plan(plan_id: str):
+    """
+    Load a saved travel plan (MCP File System)
+    """
+    if not MCP_ENDPOINTS_AVAILABLE:
+        return {
+            "error": "MCP not available",
+            "message": "Install MCP and filesystem server to use this feature"
+        }
+
+    try:
+        import json
+
+        # Load via MCP filesystem (with cache)
+        result = await mcp_manager.call_tool_with_cache(
+            "filesystem",
+            "read_file",
+            {"path": f"{plan_id}.json"},
+            cache_category="places"
+        )
+
+        if hasattr(result, 'content'):
+            for item in result.content:
+                if hasattr(item, 'text'):
+                    plan_data = json.loads(item.text)
+                    return {
+                        "status": "success",
+                        "plan": plan_data
+                    }
+
+        return {
+            "status": "error",
+            "message": f"Plan {plan_id} not found"
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": f"Failed to load plan {plan_id}"
+        }
+
+
+@router.get("/plans")
+async def list_travel_plans(limit: int = 20):
+    """
+    List all saved travel plans (MCP File System)
+    """
+    if not MCP_ENDPOINTS_AVAILABLE:
+        return {
+            "error": "MCP not available",
+            "message": "Install MCP and filesystem server to use this feature"
+        }
+
+    try:
+        # List files via MCP filesystem
+        result = await mcp_manager.call_tool_with_cache(
+            "filesystem",
+            "list_directory",
+            {"path": "."},
+            cache_category="places"
+        )
+
+        plans = []
+        if hasattr(result, 'content'):
+            for item in result.content:
+                if hasattr(item, 'text') and '.json' in item.text:
+                    plan_id = item.text.replace('.json', '')
+                    plans.append(plan_id)
+
+        return {
+            "status": "success",
+            "plans": plans[:limit],
+            "total": len(plans)
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to list plans"
+        }
+
+
+@router.get("/mcp-status")
+async def get_mcp_status_endpoint():
+    """
+    Get detailed MCP and cache status
+    """
+    if not MCP_ENDPOINTS_AVAILABLE:
+        return {
+            "mcp_available": False,
+            "message": "MCP not installed. Run: pip install mcp"
+        }
+
+    try:
+        status = get_mcp_status()
+
+        # Add cache statistics
+        cache_stats = cache_manager.get_cache_stats()
+
+        return {
+            "mcp_available": True,
+            "servers": status.get("servers", {}),
+            "cache": cache_stats,
+            "performance": {
+                "total_cache_hits": "Data reused from cache",
+                "api_calls_saved": "Minimized through caching"
+            }
+        }
+
+    except Exception as e:
+        return {
+            "mcp_available": True,
+            "error": str(e),
+            "message": "Error getting MCP status"
+        }

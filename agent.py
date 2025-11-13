@@ -20,6 +20,15 @@ except ImportError:
 
 from tools import tools
 
+# Import MCP tools (optional)
+try:
+    from mcp_integration import get_mcp_tools
+    mcp_tools = get_mcp_tools()
+    print(f"✅ Loaded {len(mcp_tools)} MCP tools")
+except ImportError as e:
+    print(f"ℹ️ MCP tools not available: {e}")
+    mcp_tools = []
+
 # Configure Gemini
 GOOGLE_API_KEY = config.GOOGLE_API_KEY or os.getenv("GOOGLE_API_KEY")
 
@@ -73,14 +82,22 @@ if LANGCHAIN_AVAILABLE:
     travel_prompt = ChatPromptTemplate.from_messages([
         ("system", """You are an expert AI travel planner for India. Your goal is to create detailed, comprehensive itineraries using ONLY AI-generated real data from tools.
 
+NEW MCP-POWERED CAPABILITIES:
+🌤️ check_weather - Get real-time weather forecasts (cached 3hrs to minimize API calls)
+💾 save_travel_plan - Save plans for users to access later
+📂 load_travel_plan - Load previously saved plans
+🧠 user_memory - Remember user preferences across sessions
+
 CRITICAL REQUIREMENTS:
 1. You MUST call tools to get AI-generated realistic data - NEVER use placeholder text
-2. ALWAYS call restaurant_search tool to get specific restaurant names with complete details
-3. ALWAYS call google_places_search tool to get specific place names with full information  
-4. Call get_reviews tool for additional travel insights and tips
-5. If a tool returns insufficient results, try different search terms and call tools again
-6. Only recommend places with 4.0+ ratings from tool results
-7. Include ALL details from tool responses (ratings, prices, addresses, timings, why famous)
+2. ALWAYS start with check_weather to get forecast and adapt recommendations to weather
+3. ALWAYS call restaurant_search tool to get specific restaurant names with complete details
+4. ALWAYS call google_places_search tool to get specific place names with full information
+5. Call get_reviews tool for additional travel insights and tips
+6. If a tool returns insufficient results, try different search terms and call tools again
+7. Only recommend places with 4.0+ ratings from tool results
+8. Include ALL details from tool responses (ratings, prices, addresses, timings, why famous)
+9. Consider weather when suggesting activities (indoor for hot/rainy, outdoor for pleasant)
 
 ENHANCED TOOL USAGE STRATEGY:
 - For EACH attraction: Call google_places_search with specific queries (e.g., "historical monuments", "temples", "parks")
@@ -142,14 +159,18 @@ You MUST provide recommendations for morning, afternoon, and evening time slots 
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
 
-    # Create agent with tools
+    # Combine regular tools with MCP tools
+    all_tools = tools + mcp_tools
+    print(f"📦 Total tools available: {len(all_tools)} ({len(tools)} regular + {len(mcp_tools)} MCP)")
+
+    # Create agent with all tools
     if GENAI_AVAILABLE and GOOGLE_API_KEY:
-        agent = create_openai_tools_agent(llm, tools, travel_prompt)
-        
+        agent = create_openai_tools_agent(llm, all_tools, travel_prompt)
+
         # Create agent executor with enhanced configuration for AI-generated content
         agent_executor = AgentExecutor(
             agent=agent,
-            tools=tools,
+            tools=all_tools,
             verbose=True,
             max_iterations=20,  # Increased for more comprehensive AI generation
             return_intermediate_steps=True,

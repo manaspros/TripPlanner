@@ -3,6 +3,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from config import config
 import uvicorn
+from contextlib import asynccontextmanager
+import asyncio
 
 # Handle imports with error handling
 try:
@@ -24,10 +26,88 @@ except ImportError as e:
     print(f"Warning: Routes import failed: {e}")
     ROUTES_AVAILABLE = False
 
+# Import MCP integration (optional)
+try:
+    from mcp_integration import initialize_mcp_servers, mcp_manager, get_mcp_status
+    MCP_AVAILABLE = True
+except ImportError as e:
+    print(f"ℹ️ MCP integration not available: {e}")
+    print("   Install with: pip install mcp && npm install -g @modelcontextprotocol/server-*")
+    MCP_AVAILABLE = False
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan manager for FastAPI - handles startup and shutdown
+    Initializes MCP servers on startup and cleans up on shutdown
+    """
+    # Startup
+    print("=" * 60)
+    print("🚀 TripPlanner Starting Up")
+    print("=" * 60)
+
+    if MCP_AVAILABLE:
+        print("\n📡 Initializing MCP servers...")
+        try:
+            init_results = await initialize_mcp_servers()
+            successful = sum(1 for v in init_results.values() if v)
+            total = len(init_results)
+
+            if successful > 0:
+                print(f"✅ MCP Initialized: {successful}/{total} servers ready")
+                print(f"   Enabled features: ", end="")
+                enabled = [name for name, status in init_results.items() if status]
+                print(", ".join(enabled))
+            else:
+                print("⚠️ No MCP servers initialized - using fallback mode")
+                print("   Check your .env file for API keys:")
+                print("   - OPENWEATHER_API_KEY (for weather forecasts)")
+        except Exception as e:
+            print(f"⚠️ MCP initialization failed: {e}")
+            print("   Continuing without MCP features")
+    else:
+        print("\nℹ️ MCP not available - running in basic mode")
+        print("   To enable advanced features:")
+        print("   1. pip install mcp")
+        print("   2. npm install -g @modelcontextprotocol/server-filesystem")
+        print("   3. npm install -g @modelcontextprotocol/server-memory")
+        print("   4. npm install -g @modelcontextprotocol/server-weather")
+
+    # Import and clean up cache on startup
+    try:
+        from cache_manager import cache_manager
+        cache_manager.cleanup_expired()
+        print("\n🧹 Cleaned up expired cache entries")
+    except ImportError:
+        pass
+
+    print("\n" + "=" * 60)
+    print(f"✅ TripPlanner Ready on http://{config.HOST}:{config.PORT}")
+    print(f"📚 API Docs: http://{config.HOST}:{config.PORT}/docs")
+    print("=" * 60 + "\n")
+
+    yield  # Server runs here
+
+    # Shutdown
+    print("\n" + "=" * 60)
+    print("🛑 TripPlanner Shutting Down")
+    print("=" * 60)
+
+    if MCP_AVAILABLE:
+        print("📡 Closing MCP connections...")
+        try:
+            await mcp_manager.cleanup()
+            print("✅ MCP connections closed")
+        except Exception as e:
+            print(f"⚠️ MCP cleanup error: {e}")
+
+    print("👋 Goodbye!\n")
+
 app = FastAPI(
     title=config.APP_NAME,
     description=config.APP_DESCRIPTION,
     version=config.APP_VERSION,
+    lifespan=lifespan
 )
 
 class TravelRequest(BaseModel):
@@ -49,12 +129,33 @@ if ROUTES_AVAILABLE:
 async def root():
     """Root endpoint with API information."""
     validation = config.validate_api_keys()
-    
+
+    # Get MCP status if available
+    mcp_info = {}
+    if MCP_AVAILABLE:
+        try:
+            mcp_status = get_mcp_status()
+            mcp_info = {
+                "enabled": True,
+                "servers": len(mcp_status.get("servers", {})),
+                "active_servers": list(mcp_status.get("servers", {}).keys()),
+                "cache_entries": mcp_status.get("cache_stats", {}).get("total_entries", 0)
+            }
+        except Exception as e:
+            mcp_info = {"enabled": False, "error": str(e)}
+    else:
+        mcp_info = {"enabled": False, "reason": "MCP not installed"}
+
     return {
         "message": "Travel Planner API is running",
+        "version": config.APP_VERSION,
         "endpoints": {
             "plan": "/api/plan - Generate travel plan",
             "any_city_plan": "/api/any-city-plan - Generate plan for any Indian city",
+            "weather": "/api/weather/{city} - Get weather forecast (MCP)",
+            "save_plan": "/api/save-plan - Save travel plan (MCP)",
+            "load_plan": "/api/plans/{plan_id} - Load saved plan (MCP)",
+            "mcp_status": "/api/mcp-status - MCP and cache status",
             "docs": "/docs - API documentation"
         },
         "api_status": {
@@ -62,7 +163,8 @@ async def root():
             "warnings": validation["warnings"],
             "agent_available": AGENT_AVAILABLE,
             "routes_available": ROUTES_AVAILABLE
-        }
+        },
+        "mcp_status": mcp_info
     }
 
 @app.post("/plan", response_model=TravelResponse)
