@@ -249,6 +249,22 @@ def get_mcp_config() -> Dict:
                 "OPENWEATHER_API_KEY": os.getenv("OPENWEATHER_API_KEY", "")
             },
             "enabled": bool(os.getenv("OPENWEATHER_API_KEY"))
+        },
+        "google-maps": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-google-maps"],
+            "env": {
+                "GOOGLE_MAPS_API_KEY": os.getenv("GOOGLE_MAPS_API_KEY", "")
+            },
+            "enabled": bool(os.getenv("GOOGLE_MAPS_API_KEY"))
+        },
+        "brave-search": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+            "env": {
+                "BRAVE_API_KEY": os.getenv("BRAVE_API_KEY", "")
+            },
+            "enabled": bool(os.getenv("BRAVE_API_KEY"))
         }
     }
 
@@ -317,6 +333,15 @@ if LANGCHAIN_AVAILABLE:
         user_id: str = Field(description="User identifier")
         key: str = Field(description="Memory key")
         value: Optional[str] = Field(None, description="Value to store")
+
+    class RouteInput(BaseModel):
+        origin: str = Field(description="Starting location")
+        destination: str = Field(description="Destination location")
+        mode: str = Field(default="transit", description="Transport mode: driving, walking, bicycling, transit")
+
+    class SearchInput(BaseModel):
+        query: str = Field(description="Search query")
+        count: int = Field(default=10, description="Number of results (1-20)")
 
     # --- MCP-Powered Tools ---
 
@@ -484,14 +509,116 @@ if LANGCHAIN_AVAILABLE:
                 logger.error(f"Memory error: {e}")
                 return f"❌ Memory operation failed: {str(e)}"
 
+    class MCPGoogleMapsTool(BaseTool):
+        """Calculate routes and travel times with caching"""
+
+        name: str = "calculate_route"
+        description: str = """Calculate route, distance, and travel time between two locations.
+        Cached for 6 hours to minimize API calls. Supports driving, walking, bicycling, transit."""
+        args_schema: Type[BaseModel] = RouteInput
+
+        def _run(self, origin: str, destination: str, mode: str = "transit") -> str:
+            return asyncio.run(self._arun(origin, destination, mode))
+
+        async def _arun(self, origin: str, destination: str, mode: str = "transit") -> str:
+            try:
+                result = await mcp_manager.call_tool_with_cache(
+                    "google-maps",
+                    "directions",
+                    {
+                        "origin": origin,
+                        "destination": destination,
+                        "mode": mode
+                    },
+                    cache_category="directions"
+                )
+
+                return self._format_route(result, origin, destination, mode)
+
+            except Exception as e:
+                logger.error(f"Maps tool error: {e}")
+                return f"❌ Unable to calculate route: {str(e)}\n💡 Tip: Check GOOGLE_MAPS_API_KEY in .env"
+
+        def _format_route(self, route_data: Any, origin: str, destination: str, mode: str) -> str:
+            """Format route information"""
+            output = f"🗺️ ROUTE: {origin} → {destination}\n"
+            output += "━" * 50 + "\n\n"
+
+            if hasattr(route_data, 'content'):
+                for item in route_data.content:
+                    if hasattr(item, 'text'):
+                        output += item.text + "\n"
+            else:
+                output += str(route_data)
+
+            output += f"\n🚇 Mode: {mode.title()}"
+            output += f"\n💡 Cached for 6 hours to save API calls"
+            return output
+
+    class MCPBraveSearchTool(BaseTool):
+        """Enhanced web search with caching"""
+
+        name: str = "search_web"
+        description: str = """Search the web for travel information, reviews, events, and local insights.
+        Cached for 8 hours to minimize API calls. Use for finding current events, recent reviews, local tips."""
+        args_schema: Type[BaseModel] = SearchInput
+
+        def _run(self, query: str, count: int = 10) -> str:
+            return asyncio.run(self._arun(query, count))
+
+        async def _arun(self, query: str, count: int = 10) -> str:
+            try:
+                result = await mcp_manager.call_tool_with_cache(
+                    "brave-search",
+                    "web_search",
+                    {
+                        "query": query,
+                        "count": min(count, 20)
+                    },
+                    cache_category="search"
+                )
+
+                return self._format_search_results(result, query)
+
+            except Exception as e:
+                logger.error(f"Search tool error: {e}")
+                return f"❌ Unable to search: {str(e)}\n💡 Tip: Check BRAVE_API_KEY in .env"
+
+        def _format_search_results(self, search_data: Any, query: str) -> str:
+            """Format search results"""
+            output = f"🔍 SEARCH RESULTS for: {query}\n"
+            output += "━" * 50 + "\n\n"
+
+            if hasattr(search_data, 'content'):
+                for item in search_data.content:
+                    if hasattr(item, 'text'):
+                        output += item.text + "\n"
+            else:
+                output += str(search_data)
+
+            output += f"\n💡 Cached for 8 hours to minimize API usage"
+            return output
+
     def get_mcp_tools() -> List[BaseTool]:
         """Get all MCP-powered LangChain tools"""
-        return [
+        tools = [
             MCPWeatherTool(),
             MCPSavePlanTool(),
             MCPLoadPlanTool(),
             MCPUserMemoryTool()
         ]
+
+        # Add Phase 2 tools if servers are configured
+        config = get_mcp_config()
+        if config.get("google-maps", {}).get("enabled"):
+            tools.append(MCPGoogleMapsTool())
+            logger.info("✅ Added Google Maps tool")
+
+        if config.get("brave-search", {}).get("enabled"):
+            tools.append(MCPBraveSearchTool())
+            logger.info("✅ Added Brave Search tool")
+
+        return tools
 
 else:
     def get_mcp_tools():

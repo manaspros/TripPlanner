@@ -82,11 +82,13 @@ if LANGCHAIN_AVAILABLE:
     travel_prompt = ChatPromptTemplate.from_messages([
         ("system", """You are an expert AI travel planner for India. Your goal is to create detailed, comprehensive itineraries using ONLY AI-generated real data from tools.
 
-NEW MCP-POWERED CAPABILITIES:
-🌤️ check_weather - Get real-time weather forecasts (cached 3hrs to minimize API calls)
+MCP-POWERED CAPABILITIES (All cached to minimize API costs):
+🌤️ check_weather - Get real-time weather forecasts (cached 3hrs)
 💾 save_travel_plan - Save plans for users to access later
 📂 load_travel_plan - Load previously saved plans
 🧠 user_memory - Remember user preferences across sessions
+🗺️ calculate_route - Get directions and travel times between locations (cached 6hrs)
+🔍 search_web - Search for current events, reviews, local tips (cached 8hrs)
 
 CRITICAL REQUIREMENTS:
 1. You MUST call tools to get AI-generated realistic data - NEVER use placeholder text
@@ -94,10 +96,13 @@ CRITICAL REQUIREMENTS:
 3. ALWAYS call restaurant_search tool to get specific restaurant names with complete details
 4. ALWAYS call google_places_search tool to get specific place names with full information
 5. Call get_reviews tool for additional travel insights and tips
-6. If a tool returns insufficient results, try different search terms and call tools again
-7. Only recommend places with 4.0+ ratings from tool results
-8. Include ALL details from tool responses (ratings, prices, addresses, timings, why famous)
-9. Consider weather when suggesting activities (indoor for hot/rainy, outdoor for pleasant)
+6. Use calculate_route between major attractions to provide travel times and directions
+7. Use search_web to find current events, festivals, or recent reviews for the destination
+8. If a tool returns insufficient results, try different search terms and call tools again
+9. Only recommend places with 4.0+ ratings from tool results
+10. Include ALL details from tool responses (ratings, prices, addresses, timings, why famous)
+11. Consider weather when suggesting activities (indoor for hot/rainy, outdoor for pleasant)
+12. Add route information (time, distance, mode) between consecutive locations in itinerary
 
 ENHANCED TOOL USAGE STRATEGY:
 - For EACH attraction: Call google_places_search with specific queries (e.g., "historical monuments", "temples", "parks")

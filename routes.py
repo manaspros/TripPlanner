@@ -700,3 +700,226 @@ async def get_mcp_status_endpoint():
             "error": str(e),
             "message": "Error getting MCP status"
         }
+
+# ============================================================================
+# PHASE 2: GOOGLE MAPS & BRAVE SEARCH ENDPOINTS
+# ============================================================================
+
+@router.get("/routes")
+async def calculate_route(
+    origin: str,
+    destination: str,
+    mode: str = "transit"
+):
+    """
+    Calculate route between two locations (Google Maps MCP)
+    Cached for 6 hours to minimize API calls
+
+    Modes: driving, walking, bicycling, transit
+    """
+    if not MCP_ENDPOINTS_AVAILABLE:
+        return {
+            "error": "MCP not available",
+            "message": "Install MCP and Google Maps server to use this feature"
+        }
+
+    try:
+        # Try cache first
+        cached_route = cache_manager.get(
+            "directions",
+            origin=origin,
+            destination=destination,
+            mode=mode
+        )
+        if cached_route:
+            return {
+                "origin": origin,
+                "destination": destination,
+                "mode": mode,
+                "route": cached_route,
+                "source": "cache",
+                "message": "Route from cache (6hr TTL)"
+            }
+
+        # Check rate limit
+        rate_status = cache_manager.get_rate_limit_status("google_maps")
+        if rate_status["status"] == "limit_exceeded":
+            return {
+                "error": "Rate limit exceeded",
+                "message": f"Google Maps rate limit reached. Resets in {rate_status['reset_in']} seconds.",
+                "rate_limit": rate_status
+            }
+
+        # Call Google Maps MCP
+        result = await mcp_manager.call_tool_with_cache(
+            "google-maps",
+            "directions",
+            {
+                "origin": origin,
+                "destination": destination,
+                "mode": mode
+            },
+            cache_category="directions"
+        )
+
+        # Format response
+        route_text = ""
+        if hasattr(result, 'content'):
+            for item in result.content:
+                if hasattr(item, 'text'):
+                    route_text = item.text
+
+        return {
+            "origin": origin,
+            "destination": destination,
+            "mode": mode,
+            "route": route_text,
+            "source": "google_maps_mcp",
+            "rate_limit": cache_manager.get_rate_limit_status("google_maps")
+        }
+
+    except Exception as e:
+        return {
+            "error": str(e),
+            "message": "Failed to calculate route. Check GOOGLE_MAPS_API_KEY in .env"
+        }
+
+
+@router.get("/search")
+async def search_travel_info(
+    query: str,
+    count: int = 10
+):
+    """
+    Search web for travel information (Brave Search MCP)
+    Cached for 8 hours to minimize API calls
+
+    Use for: events, reviews, local tips, current information
+    """
+    if not MCP_ENDPOINTS_AVAILABLE:
+        return {
+            "error": "MCP not available",
+            "message": "Install MCP and Brave Search server to use this feature"
+        }
+
+    try:
+        # Try cache first
+        cached_search = cache_manager.get(
+            "search",
+            query=query,
+            count=count
+        )
+        if cached_search:
+            return {
+                "query": query,
+                "count": count,
+                "results": cached_search,
+                "source": "cache",
+                "message": "Search results from cache (8hr TTL)"
+            }
+
+        # Check rate limit (50/hour for free tier)
+        rate_status = cache_manager.get_rate_limit_status("brave_search")
+        if rate_status["status"] == "limit_exceeded":
+            return {
+                "error": "Rate limit exceeded",
+                "message": f"Brave Search rate limit reached. Resets in {rate_status['reset_in']} seconds.",
+                "rate_limit": rate_status
+            }
+
+        # Call Brave Search MCP
+        result = await mcp_manager.call_tool_with_cache(
+            "brave-search",
+            "web_search",
+            {
+                "query": query,
+                "count": min(count, 20)
+            },
+            cache_category="search"
+        )
+
+        # Format response
+        search_text = ""
+        if hasattr(result, 'content'):
+            for item in result.content:
+                if hasattr(item, 'text'):
+                    search_text = item.text
+
+        return {
+            "query": query,
+            "count": count,
+            "results": search_text,
+            "source": "brave_search_mcp",
+            "rate_limit": cache_manager.get_rate_limit_status("brave_search")
+        }
+
+    except Exception as e:
+        return {
+            "error": str(e),
+            "message": "Failed to search. Check BRAVE_API_KEY in .env"
+        }
+
+
+@router.post("/optimize-itinerary")
+async def optimize_itinerary(request: dict):
+    """
+    Optimize itinerary with route calculations
+    Automatically calculates best routes between locations
+    """
+    if not MCP_ENDPOINTS_AVAILABLE:
+        return {
+            "error": "MCP not available",
+            "message": "Install MCP servers to use this feature"
+        }
+
+    try:
+        locations = request.get("locations", [])
+        mode = request.get("mode", "transit")
+
+        if len(locations) < 2:
+            return {
+                "error": "Need at least 2 locations",
+                "message": "Provide array of locations to optimize"
+            }
+
+        # Calculate routes between consecutive locations
+        routes = []
+
+        for i in range(len(locations) - 1):
+            origin = locations[i]
+            destination = locations[i + 1]
+
+            # Use cached route calculation
+            route_result = await mcp_manager.call_tool_with_cache(
+                "google-maps",
+                "directions",
+                {
+                    "origin": origin,
+                    "destination": destination,
+                    "mode": mode
+                },
+                cache_category="directions"
+            )
+
+            routes.append({
+                "from": origin,
+                "to": destination,
+                "mode": mode,
+                "details": route_result
+            })
+
+        return {
+            "status": "success",
+            "optimized_route": routes,
+            "total_locations": len(locations),
+            "total_segments": len(routes),
+            "mode": mode,
+            "message": "Routes calculated and cached for 6 hours"
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to optimize itinerary"
+        }

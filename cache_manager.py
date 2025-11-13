@@ -48,6 +48,10 @@ class CacheManager:
         (self.cache_dir / "places").mkdir(exist_ok=True)
         (self.cache_dir / "memory").mkdir(exist_ok=True)
         (self.cache_dir / "routes").mkdir(exist_ok=True)
+        (self.cache_dir / "directions").mkdir(exist_ok=True)
+        (self.cache_dir / "search").mkdir(exist_ok=True)
+        (self.cache_dir / "events").mkdir(exist_ok=True)
+        (self.cache_dir / "restaurants").mkdir(exist_ok=True)
 
         # Rate limit tracking
         self.rate_limits_file = self.cache_dir / "rate_limits.json"
@@ -60,15 +64,19 @@ class CacheManager:
             "restaurants": 12 * 60 * 60, # 12 hours
             "reviews": 12 * 60 * 60,     # 12 hours
             "memory": 1 * 60 * 60,       # 1 hour
-            "routes": 6 * 60 * 60,       # 6 hours
+            "routes": 6 * 60 * 60,       # 6 hours (routes don't change often)
+            "directions": 6 * 60 * 60,   # 6 hours (directions stable)
+            "search": 8 * 60 * 60,       # 8 hours (search results relatively stable)
+            "events": 4 * 60 * 60,       # 4 hours (events can be time-sensitive)
             "default": 1 * 60 * 60       # 1 hour default
         }
 
         # API call limits (per hour)
         self.api_limits = {
-            "weather": {"limit": 60, "period": 3600},      # 60 calls/hour
-            "google_places": {"limit": 100, "period": 3600}, # 100 calls/hour
-            "google_maps": {"limit": 100, "period": 3600},   # 100 calls/hour
+            "weather": {"limit": 60, "period": 3600},        # 60 calls/hour (OpenWeather free tier)
+            "google_places": {"limit": 100, "period": 3600}, # 100 calls/hour (conservative)
+            "google_maps": {"limit": 100, "period": 3600},   # 100 calls/hour (conservative)
+            "brave_search": {"limit": 50, "period": 3600},   # 50 calls/hour (free tier: 2000/month)
         }
 
         logger.info(f"Cache manager initialized at {self.cache_dir}")

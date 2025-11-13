@@ -152,9 +152,12 @@ async def root():
         "endpoints": {
             "plan": "/api/plan - Generate travel plan",
             "any_city_plan": "/api/any-city-plan - Generate plan for any Indian city",
-            "weather": "/api/weather/{city} - Get weather forecast (MCP)",
-            "save_plan": "/api/save-plan - Save travel plan (MCP)",
-            "load_plan": "/api/plans/{plan_id} - Load saved plan (MCP)",
+            "weather": "/api/weather/{city} - Get weather forecast (Phase 1)",
+            "save_plan": "/api/save-plan - Save travel plan (Phase 1)",
+            "load_plan": "/api/plans/{plan_id} - Load saved plan (Phase 1)",
+            "routes": "/api/routes?origin=X&destination=Y - Calculate route (Phase 2)",
+            "search": "/api/search?query=X - Search travel info (Phase 2)",
+            "optimize": "/api/optimize-itinerary - Optimize multiple locations (Phase 2)",
             "mcp_status": "/api/mcp-status - MCP and cache status",
             "docs": "/docs - API documentation"
         },
