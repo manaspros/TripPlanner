@@ -78,14 +78,16 @@ CRITICAL REQUIREMENTS:
 2. ALWAYS call restaurant_search tool to get specific restaurant names with complete details
 3. ALWAYS call google_places_search tool to get specific place names with full information  
 4. Call get_reviews tool for additional travel insights and tips
-5. If a tool returns insufficient results, try different search terms and call tools again
-6. Only recommend places with 4.0+ ratings from tool results
-7. Include ALL details from tool responses (ratings, prices, addresses, timings, why famous)
+5. You MUST call reddit_search tool for each city and main topic (e.g., food, sightseeing, travel tips) and summarize the top Reddit posts for the user.
+6. If a tool returns insufficient results, try different search terms and call tools again
+7. Only recommend places with 4.0+ ratings from tool results
+8. Include ALL details from tool responses (ratings, prices, addresses, timings, why famous)
 
 ENHANCED TOOL USAGE STRATEGY:
 - For EACH attraction: Call google_places_search with specific queries (e.g., "historical monuments", "temples", "parks")
 - For EACH meal: Call restaurant_search with cuisine type and meal timing (e.g., "vegetarian lunch", "street food")
 - For comprehensive planning: Call get_reviews for additional insights about the destination
+- For each city and for each main topic (food, sightseeing, travel tips), you MUST call reddit_search and summarize the top Reddit posts for the user. Include a "Reddit Insights" section in your output for each day or city.
 - Use exact names, ratings, and details returned by tools
 - Make multiple tool calls to gather comprehensive information
 
@@ -103,6 +105,7 @@ RESPONSE FORMAT REQUIREMENTS:
 - Include opening hours, entry fees, duration from tools
 - Add "Why Famous" information from tools
 - Include specific restaurant details: cuisine, famous dishes, price ranges
+- Include a "Reddit Insights" section for each city and topic, summarizing the top Reddit posts using the reddit_search tool.
 - Format with proper headers, bullet points, and clear sections
 
 ENHANCED OUTPUT FORMAT:
@@ -125,6 +128,8 @@ ENHANCED OUTPUT FORMAT:
 
 📝 TRAVEL INSIGHTS: [Insights from get_reviews tool]
 
+🔎 REDDIT INSIGHTS: [Summarized Reddit tips and posts for this city and topic from reddit_search tool]
+
 VALIDATION CHECKLIST:
 ✅ Every place/restaurant name is specific and from AI tools
 ✅ All ratings are from actual tool responses
@@ -133,9 +138,11 @@ VALIDATION CHECKLIST:
 ✅ No generic or placeholder text used
 ✅ Multiple tool calls made for comprehensive information
 ✅ Travel insights included from reviews tool
+✅ Reddit insights included from reddit_search tool for each city and topic
 
 Remember: Call tools extensively and use their AI-generated realistic data. Never assume or use generic information.
 You MUST provide recommendations for morning, afternoon, and evening time slots each day, using the time_of_day parameter in your tool calls.
+You MUST call reddit_search for each city and main topic (food, sightseeing, travel tips) and include a Reddit Insights section in your output.
 """),
         
         ("human", "{input}"),
